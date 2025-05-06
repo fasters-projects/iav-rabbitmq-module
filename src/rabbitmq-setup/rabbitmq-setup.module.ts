@@ -1,6 +1,7 @@
 import { DynamicModule, Module } from '@nestjs/common';
 import { RabbitSetupService } from './rabbitmq-setup.service';
 import { RabbitMQConnectionModule } from 'src/rabbitmq-connection/rabbitmq-connection.module';
+import { RabbitSetupOptions } from './interfaces';
 
 @Module({
   exports: [RabbitSetupService],
@@ -9,7 +10,7 @@ import { RabbitMQConnectionModule } from 'src/rabbitmq-connection/rabbitmq-conne
 })
 export class RabbitmqSetupModule<Q,E,R> {
 
-  static register<Q,E,R>(options: RabbitmqSetupModule<Q,E,R>): DynamicModule {
+  static register<Q,E,R>(options: RabbitSetupOptions<Q,E,R>): DynamicModule {
     return {
       module: RabbitmqSetupModule,
       imports: [RabbitMQConnectionModule],
