@@ -13,7 +13,7 @@ exports.RabbitMQConsumerProvider = void 0;
 const common_1 = require("@nestjs/common");
 const core_1 = require("@nestjs/core");
 const rabbitmq_consumer_decorators_1 = require("./rabbitmq-consumer.decorators");
-const rabbitmq_connection_service_1 = require("src/rabbitmq-connection/rabbitmq-connection.service");
+const rabbitmq_connection_service_1 = require("../rabbitmq-connection/rabbitmq-connection.service");
 let RabbitMQConsumerProvider = class RabbitMQConsumerProvider {
     constructor(discoveryService, connectionService) {
         this.discoveryService = discoveryService;

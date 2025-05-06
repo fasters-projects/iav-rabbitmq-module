@@ -10,7 +10,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.RabbitmqSetupModule = void 0;
 const common_1 = require("@nestjs/common");
 const rabbitmq_setup_service_1 = require("./rabbitmq-setup.service");
-const rabbitmq_connection_module_1 = require("src/rabbitmq-connection/rabbitmq-connection.module");
+const rabbitmq_connection_module_1 = require("../rabbitmq-connection/rabbitmq-connection.module");
 let RabbitmqSetupModule = RabbitmqSetupModule_1 = class RabbitmqSetupModule {
     static register(options) {
         return {

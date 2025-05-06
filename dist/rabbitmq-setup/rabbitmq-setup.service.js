@@ -14,8 +14,8 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.RabbitSetupService = void 0;
 const common_1 = require("@nestjs/common");
-const rabbitmq_connection_service_1 = require("src/rabbitmq-connection/rabbitmq-connection.service");
-const utils_1 = require("src/utils");
+const rabbitmq_connection_service_1 = require("../rabbitmq-connection/rabbitmq-connection.service");
+const utils_1 = require("../utils");
 const DEFAULT_ROUTING_KEY = '';
 const DEFAULT_DELAY_TIME = 1000 * 60 * 1;
 const DEFAULT_MAX_RETRIES = 5;

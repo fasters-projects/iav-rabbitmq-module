@@ -1,7 +1,7 @@
 import { OnModuleInit } from "@nestjs/common";
 import { DiscoveryService } from '@nestjs/core';
 import { Channel, Message } from 'amqplib';
-import { RabbitMQConnectionService } from "src/rabbitmq-connection/rabbitmq-connection.service";
+import { RabbitMQConnectionService } from "../rabbitmq-connection/rabbitmq-connection.service";
 export interface MessageConsumerContext {
     channel: Channel;
     message: Message;

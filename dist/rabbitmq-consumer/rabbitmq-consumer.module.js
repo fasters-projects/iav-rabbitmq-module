@@ -10,7 +10,7 @@ exports.RabbitmqConsumerModule = void 0;
 const common_1 = require("@nestjs/common");
 const rabbitmq_consumer_provider_1 = require("./rabbitmq-consumer.provider");
 const core_1 = require("@nestjs/core");
-const rabbitmq_connection_module_1 = require("src/rabbitmq-connection/rabbitmq-connection.module");
+const rabbitmq_connection_module_1 = require("../rabbitmq-connection/rabbitmq-connection.module");
 let RabbitmqConsumerModule = class RabbitmqConsumerModule {
 };
 exports.RabbitmqConsumerModule = RabbitmqConsumerModule;

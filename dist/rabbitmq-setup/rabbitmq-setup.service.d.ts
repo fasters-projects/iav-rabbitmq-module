@@ -1,5 +1,5 @@
 import { OnModuleInit } from "@nestjs/common";
-import { RabbitMQConnectionService } from 'src/rabbitmq-connection/rabbitmq-connection.service';
+import { RabbitMQConnectionService } from '../rabbitmq-connection/rabbitmq-connection.service';
 import { QueueBindConfig, RabbitSetupOptions } from './interfaces';
 export declare class RabbitSetupService<Q extends string, E extends string, R extends string> implements OnModuleInit {
     private readonly connectionService;
