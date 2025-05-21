@@ -4,6 +4,7 @@ import { Channel, ChannelModel, connect } from "amqplib";
 export const RABBITMQ_OPTIONS = 'RABBITMQ_OPTIONS';
 export interface RabbitMQConfigModuleOptions {
   url: string;  
+  autoConnect: boolean
 }
 
 export interface PublishOptions {
@@ -21,7 +22,7 @@ export enum CustomHeaderNames {
 }
 
 @Injectable()
-export class RabbitMQConnectionService implements OnModuleDestroy {
+export class RabbitMQConnectionService implements OnModuleDestroy, OnModuleInit {
 
   private channel: Channel;
   private connection: ChannelModel;
@@ -29,6 +30,11 @@ export class RabbitMQConnectionService implements OnModuleDestroy {
   constructor(
       @Inject(RABBITMQ_OPTIONS) private options: RabbitMQConfigModuleOptions,      
     ) {}
+
+  async onModuleInit() {
+    if(this.options.autoConnect === true)
+      await this.connect()
+  }
 
   async connect() {
     if (!this.connection) {

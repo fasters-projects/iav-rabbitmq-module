@@ -27,9 +27,13 @@ let RabbitMQConnectionService = class RabbitMQConnectionService {
     constructor(options) {
         this.options = options;
     }
+    async onModuleInit() {
+        if (this.options.autoConnect === true)
+            await this.connect();
+    }
     async connect() {
         if (!this.connection) {
-            console.log("connectiong to rabbitmq...");
+            console.log("connecting to rabbitmq...");
             this.connection = await (0, amqplib_1.connect)(this.options.url);
             this.channel = await this.connection.createConfirmChannel();
         }
