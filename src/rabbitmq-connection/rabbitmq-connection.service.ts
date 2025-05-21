@@ -38,7 +38,7 @@ export class RabbitMQConnectionService implements OnModuleDestroy, OnModuleInit 
 
   async connect() {
     if (!this.connection) {
-      console.log("connectiong to rabbitmq...");
+      console.log("connecting to rabbitmq...");
       this.connection = await connect(this.options.url)
       this.channel = await this.connection.createConfirmChannel();
     }

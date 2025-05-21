@@ -52,6 +52,7 @@ const queueConfigurations = [
     }),
     RabbitMQConnectionModule.register({
       url: process.env.RABBITMQ_URL || 'amqp://localhost',
+      autoConnect: true, //Para conectar no OnModuleInit
     }),
     RabbitmqConsumerModule,
     NotificationModule,
