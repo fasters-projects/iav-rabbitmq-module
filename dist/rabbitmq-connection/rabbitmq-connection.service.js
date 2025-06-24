@@ -37,6 +37,7 @@ let RabbitMQConnectionService = class RabbitMQConnectionService {
             this.connection = await (0, amqplib_1.connect)(this.options.url);
             this.channel = await this.connection.createConfirmChannel();
         }
+        return this.connection;
     }
     getChannel() {
         if (this.channel === undefined)

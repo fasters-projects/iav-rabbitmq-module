@@ -152,7 +152,7 @@ export class RabbitSetupService<Q extends string, E extends string, R extends st
         );
         if(!this.connection)
           this.connection = await this.connectionService.connect();
-        const channel = await this.connection.createChannel();
+        const channel = await this.connectionService.getChannel();
         await channel.deleteQueue(queueName, { ifUnused: false });
         await channel.close();
         await this.onModuleInit();

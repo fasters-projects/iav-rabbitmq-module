@@ -42,6 +42,7 @@ export class RabbitMQConnectionService implements OnModuleDestroy, OnModuleInit 
       this.connection = await connect(this.options.url)
       this.channel = await this.connection.createConfirmChannel();
     }
+    return this.connection
   }
 
   getChannel(): Channel {

@@ -1,5 +1,5 @@
 import { OnModuleDestroy, OnModuleInit } from "@nestjs/common";
-import { Channel } from "amqplib";
+import { Channel, ChannelModel } from "amqplib";
 export declare const RABBITMQ_OPTIONS = "RABBITMQ_OPTIONS";
 export interface RabbitMQConfigModuleOptions {
     url: string;
@@ -23,7 +23,7 @@ export declare class RabbitMQConnectionService implements OnModuleDestroy, OnMod
     private connection;
     constructor(options: RabbitMQConfigModuleOptions);
     onModuleInit(): Promise<void>;
-    connect(): Promise<void>;
+    connect(): Promise<ChannelModel>;
     getChannel(): Channel;
     publish(publishOptions: PublishOptions): Boolean;
     onModuleDestroy(): Promise<void>;
