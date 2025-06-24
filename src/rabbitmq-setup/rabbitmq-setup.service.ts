@@ -4,8 +4,7 @@ import { Inject, Injectable, OnModuleInit } from "@nestjs/common";
 
 import { CustomHeaderNames, RabbitMQConnectionService } from 'src/rabbitmq-connection/rabbitmq-connection.service';
 import { QueueBindConfig, RabbitSetupOptions } from './interfaces';
-import { createDelayQueueName, createDlqQueueName, createExchangeDelayName, createExchangeDlxName, createExchangeRetryName, createRetryQueueName, createRoutingKeyDelayName, createRoutingKeyRetryName } from 'src/utils';
-
+import { createDelayQueueName, createDlqQueueName, createExchangeDelayName, createExchangeDlxName, createExchangeRetryName, createRetryQueueName, createRoutingKeyDelayName, createRoutingKeyDlqName, createRoutingKeyRetryName } from 'src/utils';
 
 const DEFAULT_ROUTING_KEY = '';
 const DEFAULT_DELAY_TIME = 1000 * 60 * 1; // 1 min
@@ -76,13 +75,14 @@ export class RabbitSetupService<Q extends string, E extends string, R extends st
   public async createDeadLetterQueue(
     queueName: string,
     deadLetterExchange: string,
+    deadLetterRoutingkey: string = DEFAULT_ROUTING_KEY,
   ): Promise<void> {
     const queueOptions = {
       durable: true,
       autoDelete: false,
       arguments: {
         'x-dead-letter-exchange': deadLetterExchange,
-        'x-dead-letter-routing-key': DEFAULT_ROUTING_KEY,
+        'x-dead-letter-routing-key': deadLetterRoutingkey,
         'x-queue-type': DEFAULT_QUEUE_TYPE,
       },
     };
@@ -95,8 +95,8 @@ export class RabbitSetupService<Q extends string, E extends string, R extends st
     deadLetterExchange: string,
     delayTime: number = DEFAULT_DELAY_TIME,
     deadLetterRoutingkey: string = DEFAULT_ROUTING_KEY,
-  ): Promise<void> {
-    const maxRetries = 5;
+    maxRetries: number = DEFAULT_MAX_RETRIES
+  ): Promise<void> {    
     const queueOptions = {
       durable: true,
       autoDelete: false,
@@ -212,6 +212,7 @@ export class RabbitSetupService<Q extends string, E extends string, R extends st
     maxRetries = DEFAULT_MAX_RETRIES,
     queue,
     routingKeys,
+    extraDlqQueue,
   }: QueueBindConfig<Q, E, R>) {
     this.queueOptions[queue] = {
       maxRetries,
@@ -222,7 +223,11 @@ export class RabbitSetupService<Q extends string, E extends string, R extends st
       exchange,
       routingKeys,
       delayTime,
+      maxRetries
     });
+
+    if(extraDlqQueue)
+      await this.createExtraDlqQueue(extraDlqQueue, exchange)
   }
 
   async setupExchangesWithRetryDlqAndDelay(exchange: string) {
@@ -245,9 +250,11 @@ export class RabbitSetupService<Q extends string, E extends string, R extends st
     exchange,
     queue,
     routingKeys,
+    maxRetries,
   }: QueueBindConfig<Q, E, R>) {
     const delayDlqRoutingKey = createRoutingKeyDelayName(queue);
-    const retryDlqRoutingKey = createRoutingKeyRetryName(queue);;
+    const retryDlqRoutingKey = createRoutingKeyRetryName(queue);
+    const mainDlqRoutingKey = createRoutingKeyDlqName(queue);
 
     const exchangeRetry = createExchangeRetryName(exchange);
     const exchangeDelay = createExchangeDelayName(exchange);
@@ -272,10 +279,12 @@ export class RabbitSetupService<Q extends string, E extends string, R extends st
       exchangeRetry,
       delayTime,
       retryDlqRoutingKey,
+      maxRetries
     );
     await this.createDeadLetterQueue(
       queueRetry,
       exchangeDlx,
+      mainDlqRoutingKey
     );
     await this.createDeadLetterQueue(queueDlq, '');
 
@@ -289,8 +298,18 @@ export class RabbitSetupService<Q extends string, E extends string, R extends st
       queueDelay,
       delayDlqRoutingKey,
     );
-    await this.bindQueue(exchangeDlx, queueDlq);
+    await this.bindQueue(exchangeDlx, queueDlq, mainDlqRoutingKey);
 
     await this.createRetryQueueConsumer(queueRetry);
   }
+
+  private async createExtraDlqQueue(queue: Q, exchange: string) {
+    
+    const exchangeDlxName = createExchangeDlxName(exchange);
+    const routingKey = createRoutingKeyDlqName(queue);
+    
+    await this.createDeadLetterQueue(queue, '');
+    await this.bindQueue(exchangeDlxName, queue, routingKey);
+  }
+
 }

@@ -18,6 +18,10 @@ export function createRoutingKeyRetryName(queueName: string): string {
   return `rk.${queueName}.retry`;
 }
 
+export function createRoutingKeyDlqName(queueName: string): string {
+  return `rk.${queueName}.dlq`;
+}
+
 export function createDelayQueueName(queueName: string): string {
   return `${queueName}.delay`;
 }

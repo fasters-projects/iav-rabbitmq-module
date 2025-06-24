@@ -59,20 +59,19 @@ let RabbitSetupService = class RabbitSetupService {
             }
         }
     }
-    async createDeadLetterQueue(queueName, deadLetterExchange) {
+    async createDeadLetterQueue(queueName, deadLetterExchange, deadLetterRoutingkey = DEFAULT_ROUTING_KEY) {
         const queueOptions = {
             durable: true,
             autoDelete: false,
             arguments: {
                 'x-dead-letter-exchange': deadLetterExchange,
-                'x-dead-letter-routing-key': DEFAULT_ROUTING_KEY,
+                'x-dead-letter-routing-key': deadLetterRoutingkey,
                 'x-queue-type': DEFAULT_QUEUE_TYPE,
             },
         };
         await this.assertQueue(queueName, queueOptions);
     }
-    async createDelayQueue(queueName, deadLetterExchange, delayTime = DEFAULT_DELAY_TIME, deadLetterRoutingkey = DEFAULT_ROUTING_KEY) {
-        const maxRetries = 5;
+    async createDelayQueue(queueName, deadLetterExchange, delayTime = DEFAULT_DELAY_TIME, deadLetterRoutingkey = DEFAULT_ROUTING_KEY, maxRetries = DEFAULT_MAX_RETRIES) {
         const queueOptions = {
             durable: true,
             autoDelete: false,
@@ -156,7 +155,7 @@ let RabbitSetupService = class RabbitSetupService {
     async closeConnection() {
         await this.channel.close();
     }
-    async setupQueue({ delayTime = DEFAULT_DELAY_TIME, exchange, maxRetries = DEFAULT_MAX_RETRIES, queue, routingKeys, }) {
+    async setupQueue({ delayTime = DEFAULT_DELAY_TIME, exchange, maxRetries = DEFAULT_MAX_RETRIES, queue, routingKeys, extraDlqQueue, }) {
         this.queueOptions[queue] = {
             maxRetries,
         };
@@ -166,7 +165,10 @@ let RabbitSetupService = class RabbitSetupService {
             exchange,
             routingKeys,
             delayTime,
+            maxRetries
         });
+        if (extraDlqQueue)
+            await this.createExtraDlqQueue(extraDlqQueue, exchange);
     }
     async setupExchangesWithRetryDlqAndDelay(exchange) {
         if (!this.createdExchanges.has(exchange)) {
@@ -180,10 +182,10 @@ let RabbitSetupService = class RabbitSetupService {
             await this.createExchange(exchangeDlx, 'topic');
         }
     }
-    async setupQueuesWithRetryAndDelay({ delayTime, exchange, queue, routingKeys, }) {
+    async setupQueuesWithRetryAndDelay({ delayTime, exchange, queue, routingKeys, maxRetries, }) {
         const delayDlqRoutingKey = (0, utils_1.createRoutingKeyDelayName)(queue);
         const retryDlqRoutingKey = (0, utils_1.createRoutingKeyRetryName)(queue);
-        ;
+        const mainDlqRoutingKey = (0, utils_1.createRoutingKeyDlqName)(queue);
         const exchangeRetry = (0, utils_1.createExchangeRetryName)(exchange);
         const exchangeDelay = (0, utils_1.createExchangeDelayName)(exchange);
         const exchangeDlx = (0, utils_1.createExchangeDlxName)(exchange);
@@ -194,13 +196,19 @@ let RabbitSetupService = class RabbitSetupService {
         for (const key of routingKeys) {
             await this.bindQueue(exchange, queue, key);
         }
-        await this.createDelayQueue(queueDelay, exchangeRetry, delayTime, retryDlqRoutingKey);
-        await this.createDeadLetterQueue(queueRetry, exchangeDlx);
+        await this.createDelayQueue(queueDelay, exchangeRetry, delayTime, retryDlqRoutingKey, maxRetries);
+        await this.createDeadLetterQueue(queueRetry, exchangeDlx, mainDlqRoutingKey);
         await this.createDeadLetterQueue(queueDlq, '');
         await this.bindQueue(exchangeRetry, queueRetry, retryDlqRoutingKey);
         await this.bindQueue(exchangeDelay, queueDelay, delayDlqRoutingKey);
-        await this.bindQueue(exchangeDlx, queueDlq);
+        await this.bindQueue(exchangeDlx, queueDlq, mainDlqRoutingKey);
         await this.createRetryQueueConsumer(queueRetry);
+    }
+    async createExtraDlqQueue(queue, exchange) {
+        const exchangeDlxName = (0, utils_1.createExchangeDlxName)(exchange);
+        const routingKey = (0, utils_1.createRoutingKeyDlqName)(queue);
+        await this.createDeadLetterQueue(queue, '');
+        await this.bindQueue(exchangeDlxName, queue, routingKey);
     }
 };
 exports.RabbitSetupService = RabbitSetupService;

@@ -5,6 +5,7 @@ exports.createExchangeDelayName = createExchangeDelayName;
 exports.createExchangeDlxName = createExchangeDlxName;
 exports.createRoutingKeyDelayName = createRoutingKeyDelayName;
 exports.createRoutingKeyRetryName = createRoutingKeyRetryName;
+exports.createRoutingKeyDlqName = createRoutingKeyDlqName;
 exports.createDelayQueueName = createDelayQueueName;
 exports.createRetryQueueName = createRetryQueueName;
 exports.createDlqQueueName = createDlqQueueName;
@@ -22,6 +23,9 @@ function createRoutingKeyDelayName(queueName) {
 }
 function createRoutingKeyRetryName(queueName) {
     return `rk.${queueName}.retry`;
+}
+function createRoutingKeyDlqName(queueName) {
+    return `rk.${queueName}.dlq`;
 }
 function createDelayQueueName(queueName) {
     return `${queueName}.delay`;
