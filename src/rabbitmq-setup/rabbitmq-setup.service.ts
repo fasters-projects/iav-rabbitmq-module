@@ -150,6 +150,8 @@ export class RabbitSetupService<Q extends string, E extends string, R extends st
         console.warn(
           `Queue "${queueName}" already exists with different arguments. Deleting and recreating it.`,
         );
+        if(!this.connection)
+          this.connection = await this.connectionService.connect();
         const channel = await this.connection.createChannel();
         await channel.deleteQueue(queueName, { ifUnused: false });
         await channel.close();
