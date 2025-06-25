@@ -18,7 +18,7 @@ const rabbitmq_connection_service_1 = require("../rabbitmq-connection/rabbitmq-c
 const utils_1 = require("../utils");
 const DEFAULT_ROUTING_KEY = '';
 const DEFAULT_DELAY_TIME = 1000 * 60 * 1;
-const DEFAULT_MAX_RETRIES = 5;
+const DEFAULT_MAX_RETRIES = 4;
 const DEFAULT_QUEUE_TYPE = 'quorum';
 let RabbitSetupService = class RabbitSetupService {
     constructor(connectionService, options) {
@@ -170,7 +170,7 @@ let RabbitSetupService = class RabbitSetupService {
             maxRetries
         });
         if (extraDlqQueue)
-            await this.createExtraDlqQueue(extraDlqQueue, exchange);
+            await this.createExtraDlqQueue(extraDlqQueue, exchange, queue);
     }
     async setupExchangesWithRetryDlqAndDelay(exchange) {
         if (!this.createdExchanges.has(exchange)) {
@@ -206,9 +206,9 @@ let RabbitSetupService = class RabbitSetupService {
         await this.bindQueue(exchangeDlx, queueDlq, mainDlqRoutingKey);
         await this.createRetryQueueConsumer(queueRetry);
     }
-    async createExtraDlqQueue(queue, exchange) {
+    async createExtraDlqQueue(queue, exchange, originalQueue) {
         const exchangeDlxName = (0, utils_1.createExchangeDlxName)(exchange);
-        const routingKey = (0, utils_1.createRoutingKeyDlqName)(queue);
+        const routingKey = (0, utils_1.createRoutingKeyDlqName)(originalQueue);
         await this.createDeadLetterQueue(queue, '');
         await this.bindQueue(exchangeDlxName, queue, routingKey);
     }

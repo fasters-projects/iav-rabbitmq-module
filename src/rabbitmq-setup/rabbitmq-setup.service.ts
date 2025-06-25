@@ -8,7 +8,7 @@ import { createDelayQueueName, createDlqQueueName, createExchangeDelayName, crea
 
 const DEFAULT_ROUTING_KEY = '';
 const DEFAULT_DELAY_TIME = 1000 * 60 * 1; // 1 min
-const DEFAULT_MAX_RETRIES = 5;
+const DEFAULT_MAX_RETRIES = 4;
 const DEFAULT_QUEUE_TYPE = 'quorum';
 
 @Injectable()
@@ -229,7 +229,7 @@ export class RabbitSetupService<Q extends string, E extends string, R extends st
     });
 
     if(extraDlqQueue)
-      await this.createExtraDlqQueue(extraDlqQueue, exchange)
+      await this.createExtraDlqQueue(extraDlqQueue, exchange, queue)
   }
 
   async setupExchangesWithRetryDlqAndDelay(exchange: string) {
@@ -305,10 +305,10 @@ export class RabbitSetupService<Q extends string, E extends string, R extends st
     await this.createRetryQueueConsumer(queueRetry);
   }
 
-  private async createExtraDlqQueue(queue: Q, exchange: string) {
+  private async createExtraDlqQueue(queue: Q, exchange: string, originalQueue: Q) {
     
     const exchangeDlxName = createExchangeDlxName(exchange);
-    const routingKey = createRoutingKeyDlqName(queue);
+    const routingKey = createRoutingKeyDlqName(originalQueue);
     
     await this.createDeadLetterQueue(queue, '');
     await this.bindQueue(exchangeDlxName, queue, routingKey);
