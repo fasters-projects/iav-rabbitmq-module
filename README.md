@@ -7,12 +7,12 @@ O `iav-rabbitmq-module` é um módulo para facilitar a integração com o Rabbit
 
 ## Instalação
 
-Certifique-se de instalar o pacote no seu projeto, no `package.json` adicione a dependência (enquanto não houver um módulo npm pra ele):
+Certifique-se de instalar o pacote no seu projeto, no `package.json` adicione a dependência (Se atente a versão):
 
 ```json
 "dependencies": {
   ...
-  "iav-rabbitmq-module": "git+ssh://git@github.com:fasters-projects/iav-rabbitmq-module.git",
+  "iav-rabbitmq-module": "github:fasters-projects/iav-rabbitmq-module.git#v1.0.0",
   ...
 }
 ```
