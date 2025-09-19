@@ -19,8 +19,8 @@ const utils_1 = require("../utils");
 const retry_consumer_1 = require("./retry-consumers/retry-consumer");
 const fixed_interval_strategy_1 = require("./strategies/fixed-interval.strategy");
 const DEFAULT_ROUTING_KEY = '';
-const DEFAULT_DELAY_TIME = 1000 * 10 * 1;
-const DEFAULT_MAX_RETRIES = 3;
+const DEFAULT_DELAY_TIME = 60000 * 10 * 1;
+const DEFAULT_MAX_RETRIES = 5;
 const DEFAULT_QUEUE_TYPE = 'quorum';
 let RabbitSetupService = class RabbitSetupService {
     constructor(connectionService, options) {

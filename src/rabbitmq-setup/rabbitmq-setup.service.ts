@@ -11,8 +11,8 @@ import { FixedIntervalDelayStrategy } from './strategies/fixed-interval.strategy
 
 
 const DEFAULT_ROUTING_KEY = '';
-const DEFAULT_DELAY_TIME = 1000 * 10 * 1; // 1 min
-const DEFAULT_MAX_RETRIES = 3;
+const DEFAULT_DELAY_TIME = 60000 * 10 * 1; // 1 min
+const DEFAULT_MAX_RETRIES = 5;
 const DEFAULT_QUEUE_TYPE = 'quorum';
 
 @Injectable()
