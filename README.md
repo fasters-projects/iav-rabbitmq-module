@@ -3,6 +3,8 @@
 
 O `iav-rabbitmq-module` é um módulo para facilitar a integração com o RabbitMQ em aplicações NestJS. Ele fornece funcionalidades para configurar filas, exchanges, bindings, consumidores e publicadores de mensagens.
 
+Importante: a biblioteca implementa auto-reconexão e auto-registro de consumidores. Se a conexão com o RabbitMQ cair, o módulo tentará reconectar periodicamente (com backoff exponencial). Após a reconexão bem-sucedida, os consumidores previamente registrados são registrados automaticamente novamente.
+
 ---
 
 ## Instalação
@@ -183,6 +185,87 @@ console.log(dlqQueue); // notification.dlq
 
 ---
 
-## Conclusão
+## Estratégias de Delay
 
-Com o `iav-rabbitmq-module`, você pode configurar e gerenciar filas, exchanges e consumidores de forma simples e eficiente, seguindo
+O módulo suporta estratégias de delay (implementações da interface `DelayStrategy`) que decidem para qual fila de delay uma mensagem deve ser enviada quando falha o processamento.
+
+- FixedInterval (padrão): aplica um intervalo fixo entre tentativas. Se nenhuma estratégia for informada para uma fila, o módulo utiliza internamente a `FixedIntervalDelayStrategy` (defaults: 1s de intervalo e 5 níveis).
+- ExponentialDelay: aplica um atraso que cresce exponencialmente até um cap configurado.
+
+As estratégias implementam a interface `DelayStrategy` que retorna um `DelayDecision` contendo campos como:
+
+- `targetDelayQueue?`: fila de delay alvo (se omitido, a mensagem vai direto para a DLQ final).
+- `expirationMs?`: tempo em ms para definir no header `expiration` da mensagem.
+- `step?`: número do passo (1-based) do delay.
+- `routingKey?`: routing key a ser usada no exchange de delay.
+- `canRetry`: indica se a mensagem ainda pode ser re-tentada.
+
+Exemplo de configuração por fila (pseudocódigo):
+
+```ts
+{
+  queue: Queues.NOTIFICATION,
+  exchange: Exchanges.NOTIFICATION,
+  routingKeys: [RoutingKeys.SEND_NOTIFICATION],
+  maxRetries: 5,
+  delayStrategy: new ExponentialDelayStrategy(1000, 2, 30 * 60 * 1000, 5),
+}
+```
+
+## extraDlqQueue
+
+Ao configurar uma fila no `RabbitmqSetupModule` é possível passar a propriedade `extraDlqQueue` no `QueueBindConfig`:
+
+- `extraDlqQueue`: nome de uma fila adicional que será ligada ao exchange DLX da aplicação. Ela permite consumir mensagens que chegaram à DLQ (Dead Letter Queue) principal, mas mantendo a DLQ principal intacta.
+
+Uso exemplo:
+
+```ts
+{
+  queue: Queues.NOTIFICATION,
+  exchange: Exchanges.NOTIFICATION,
+  routingKeys: [RoutingKeys.SEND_NOTIFICATION],
+  extraDlqQueue: Queues.NOTIFICATION_EXTRA_DLQ // Será criada e ligada ao <exchange>.dlx com a routing key `rk.<queue>.dlq`
+}
+```
+
+Quando `extraDlqQueue` é informado, o módulo cria essa fila (durable) e a liga ao exchange `<exchange>.dlx` usando a routing key `rk.<queue>.dlq`. Isso permite consumir mensagens que foram para DLQ sem remover a DLQ principal do fluxo.
+
+## Convenções de nomes e flags de delay
+
+O módulo usa utilitários para gerar nomes consistentes. Principais funções e seus resultados:
+
+- `createExchangeRetryName(exchange)` -> `${exchange}.retry`
+- `createExchangeDelayName(exchange)` -> `${exchange}.delay`
+- `createExchangeDlxName(exchange)` -> `${exchange}.dlx`
+
+- `createRetryQueueName(queue)` -> `${queue}.retry`
+- `createDelayQueueName(queue)` -> `${queue}.delay`
+- `createNumberedDelayQueueName(queue, step)` -> `${queue}.delay.step${step}` (usado para gerar as filas de delay por nível)
+- `createDlqQueueName(queue)` -> `${queue}.dlq`
+
+- `createRoutingKeyDelayName(queue, step?)` -> `rk.${queue}.delay` ou `rk.${queue}.delay.step${step}`
+- `createRoutingKeyRetryName(queue)` -> `rk.${queue}.retry`
+- `createRoutingKeyDlqName(queue)` -> `rk.${queue}.dlq`
+
+Flags/arguments relevantes para filas criadas pelo módulo:
+
+- `x-dead-letter-exchange`: exchange de dead-letter configurado para filas principais e de delay.
+- `x-dead-letter-routing-key`: routing key usada para encaminhar mensagens para DLX.
+- `x-max-retries`: definido nas filas de delay para indicar o máximo de tentativas (usado internamente pelo consumidor de retry).
+
+Observação: o módulo gera automaticamente filas de delay numeradas (step1..stepN) com base em `maxRetries`. Cada fila de delay é criada com `x-dead-letter-exchange` apontando para o exchange principal e `x-dead-letter-routing-key` para a routing key principal da fila; após a expiração a mensagem volta ao fluxo apropriado.
+
+## Exemplos praticos de Retry com diferentes estratégias de delay
+
+Para executar o exemplo de estratégia de delay com tempo fixo:
+
+```sh
+npx ts-node -r tsconfig-paths/register ./src/example/main.ts
+```
+
+Para executar o exemplo de estratégia de delay com delay exponencial:
+
+```sh
+npx ts-node -r tsconfig-paths/register ./src/example/main-exponential.ts
+```

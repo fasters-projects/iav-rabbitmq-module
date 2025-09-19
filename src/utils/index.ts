@@ -10,7 +10,8 @@ export function createExchangeDlxName(exchangeName: string): string {
   return `${exchangeName}.dlx`
 }
 
-export function createRoutingKeyDelayName(queueName: string): string {
+export function createRoutingKeyDelayName(queueName: string, step?: number): string {
+  if (step && step > 0) return `rk.${queueName}.delay.step${step}`;
   return `rk.${queueName}.delay`;
 }
 
@@ -28,4 +29,12 @@ export function createRetryQueueName(queueName: string): string {
 
 export function createDlqQueueName(queueName: string): string {
   return `${queueName}.dlq`;
+}
+
+export function createNumberedDelayQueueName(queueName: string, index: number): string {
+  return `${queueName}.delay.step${index}`;
+}
+
+export function createRoutingKeyDlqName(queueName: string): string {
+  return `rk.${queueName}.dlq`;
 }

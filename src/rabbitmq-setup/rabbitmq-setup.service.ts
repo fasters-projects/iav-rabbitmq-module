@@ -4,12 +4,15 @@ import { Inject, Injectable, OnModuleInit } from "@nestjs/common";
 
 import { CustomHeaderNames, RabbitMQConnectionService } from 'src/rabbitmq-connection/rabbitmq-connection.service';
 import { QueueBindConfig, RabbitSetupOptions } from './interfaces';
-import { createDelayQueueName, createDlqQueueName, createExchangeDelayName, createExchangeDlxName, createExchangeRetryName, createRetryQueueName, createRoutingKeyDelayName, createRoutingKeyRetryName } from 'src/utils';
+import { createDelayQueueName, createDlqQueueName, createExchangeDelayName, createExchangeDlxName, createExchangeRetryName, createRetryQueueName, createRoutingKeyDelayName, createRoutingKeyRetryName, createNumberedDelayQueueName, createRoutingKeyDlqName } from 'src/utils';
+import { DelayStrategy } from './interfaces/delay-strategy.interface';
+import { retryConsumer, RetryConsumerOptions } from './retry-consumers/retry-consumer';
+import { FixedIntervalDelayStrategy } from './strategies/fixed-interval.strategy';
 
 
 const DEFAULT_ROUTING_KEY = '';
-const DEFAULT_DELAY_TIME = 1000 * 60 * 1; // 1 min
-const DEFAULT_MAX_RETRIES = 5;
+const DEFAULT_DELAY_TIME = 1000 * 10 * 1; // 1 min
+const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_QUEUE_TYPE = 'quorum';
 
 @Injectable()
@@ -92,19 +95,16 @@ export class RabbitSetupService<Q extends string, E extends string, R extends st
 
   public async createDelayQueue(
     queueName: string,
-    deadLetterExchange: string,
-    delayTime: number = DEFAULT_DELAY_TIME,
+    deadLetterExchange: string,    
     deadLetterRoutingkey: string = DEFAULT_ROUTING_KEY,
   ): Promise<void> {
-    const maxRetries = 5;
+    // Delay queues should not enforce TTL at the queue level; expiration is set on publish.
     const queueOptions = {
       durable: true,
       autoDelete: false,
       arguments: {
         'x-dead-letter-exchange': deadLetterExchange,
         'x-dead-letter-routing-key': deadLetterRoutingkey,
-        'x-max-retries': maxRetries,
-        'x-message-ttl': delayTime,
         'x-queue-type': DEFAULT_QUEUE_TYPE,
       },
     };
@@ -161,57 +161,20 @@ export class RabbitSetupService<Q extends string, E extends string, R extends st
     }
   }
 
-  async createRetryQueueConsumer(retryQueueName: string) {
-    this.channel.consume(retryQueueName, async (message: Message | null) => {
-      if (!message) {
-        console.info("Message doesn't exist. Queue: ", retryQueueName);
-        return;
-      }
-      const headers = message.properties.headers || {};
-      try {
-       
-        const originQueue = headers[CustomHeaderNames.FirstDeathQueue];
-        const currentCount = headers[CustomHeaderNames.RetryCount]
-          ? parseInt(headers[CustomHeaderNames.RetryCount], 10)
-          : 1;
-        const maxRetries =
-          this.queueOptions[originQueue as Q]?.maxRetries || 0;
-
-        if (currentCount > maxRetries+1) {
-          console.warn(
-            `Max retryes reached: ${originQueue}, sending to DLQ. message: ${message.content.toString()}`,
-          );
-          this.channel.nack(message as Message, false, false);
-          return;
-        }
-
-        headers[CustomHeaderNames.RetryCount] = currentCount + 1;
-
-        console.info(
-          `Resending Message to queue ${originQueue}: Message :${message.content.toString()}`,
-        );
-        this.channel.sendToQueue(originQueue as string, message.content, {
-          headers: headers,
-        });
-        this.channel.ack(message);
-      } catch (error) {
-        console.info(`ErrorIn Queue: ${retryQueueName}, sending to DLQ`);
-        headers[CustomHeaderNames.LastError] = error;
-        this.channel.nack(message as Message, false, false);
-      }
-    });
-  }
+  // single retry consumer is implemented in separate file and used below
 
   private async closeConnection(): Promise<void> {
     await this.channel.close();
   }
 
-  async setupQueue({
-    delayTime = DEFAULT_DELAY_TIME,
+  async setupQueue({    
     exchange,
     maxRetries = DEFAULT_MAX_RETRIES,
     queue,
     routingKeys,
+    extraDlqQueue,
+    delayTime,
+    delayStrategy
   }: QueueBindConfig<Q, E, R>) {
     this.queueOptions[queue] = {
       maxRetries,
@@ -220,9 +183,13 @@ export class RabbitSetupService<Q extends string, E extends string, R extends st
     await this.setupQueuesWithRetryAndDelay({
       queue,
       exchange,
-      routingKeys,
-      delayTime,
+      routingKeys, 
+      delayStrategy,
+      delayTime,   
     });
+
+     if(extraDlqQueue)
+      await this.createExtraDlqQueue(extraDlqQueue, exchange, queue)
   }
 
   async setupExchangesWithRetryDlqAndDelay(exchange: string) {
@@ -240,57 +207,96 @@ export class RabbitSetupService<Q extends string, E extends string, R extends st
     }
   }
 
-  async setupQueuesWithRetryAndDelay({
-    delayTime,
+  async setupQueuesWithRetryAndDelay({    
     exchange,
     queue,
     routingKeys,
+    delayTime = DEFAULT_DELAY_TIME,
+    delayStrategy,
   }: QueueBindConfig<Q, E, R>) {
-    const delayDlqRoutingKey = createRoutingKeyDelayName(queue);
-    const retryDlqRoutingKey = createRoutingKeyRetryName(queue);;
+    const retryRoutingKey = createRoutingKeyRetryName(queue);
+    const dlqRoutingKey = createRoutingKeyDlqName(queue);
 
     const exchangeRetry = createExchangeRetryName(exchange);
     const exchangeDelay = createExchangeDelayName(exchange);
-    const exchangeDlx = createExchangeDlxName(exchange);    
+    const exchangeDlx = createExchangeDlxName(exchange);
 
-    const queueDelay = createDelayQueueName(queue);
     const queueRetry = createRetryQueueName(queue);
     const queueDlq = createDlqQueueName(queue);
 
+    // main queue: dead-letter to retry exchange using retryRoutingKey
     await this.createQueue(
       queue,
-      exchangeDelay,
-      delayDlqRoutingKey,
+      exchangeRetry,
+      retryRoutingKey,
     );
 
+    // bind main queue to main exchange routing keys
     for (const key of routingKeys) {
       await this.bindQueue(exchange, queue, key);
     }
 
-    await this.createDelayQueue(
-      queueDelay,
-      exchangeRetry,
-      delayTime,
-      retryDlqRoutingKey,
-    );
-    await this.createDeadLetterQueue(
+    // create numbered delay queues for each retry step; they dead-letter back to main exchange using main routing key
+    const mainRoutingKey = routingKeys && routingKeys.length ? routingKeys[0] : DEFAULT_ROUTING_KEY;
+    const maxRetries = this.queueOptions[queue]?.maxRetries ?? DEFAULT_MAX_RETRIES;
+    for (let step = 1; step <= maxRetries; step++) {
+      const numberedDelayQueue = createNumberedDelayQueueName(queue, step);
+      await this.createDelayQueue(numberedDelayQueue, exchange, mainRoutingKey);
+      const routingKeyForStep = createRoutingKeyDelayName(queue, step);
+      await this.bindQueue(exchangeDelay, numberedDelayQueue, routingKeyForStep);
+    }
+
+    // retry queue: dead-letter to final DLX exchange (use createQueue so we can set routing key)
+    await this.createQueue(
       queueRetry,
       exchangeDlx,
+      dlqRoutingKey,
     );
-    await this.createDeadLetterQueue(queueDlq, '');
 
-    await this.bindQueue(
-      exchangeRetry,
-      queueRetry,
-      retryDlqRoutingKey,
-    );
-    await this.bindQueue(
-      exchangeDelay,
-      queueDelay,
-      delayDlqRoutingKey,
-    );
-    await this.bindQueue(exchangeDlx, queueDlq);
+    // final DLQ (no DLX)
+    await this.createQueue(queueDlq, '');
+    
+    await this.bindQueue(exchangeRetry, queueRetry, retryRoutingKey);      
+    await this.bindQueue(exchangeDlx, queueDlq, dlqRoutingKey);    
+    
 
-    await this.createRetryQueueConsumer(queueRetry);
+    await this.createRetryConsumer({
+      exchange,    
+      delayStrategy,
+      delayTime,
+      queue,
+    } as QueueBindConfig<Q, E, R>);
   }
+
+  private createRetryConsumer( {
+    exchange,    
+    delayStrategy,
+    delayTime,
+    queue,
+  }: QueueBindConfig<Q, E, R>) {
+    const exchangeDelay = createExchangeDelayName(exchange);
+    const queueRetry = createRetryQueueName(queue);
+    const retryConsumerOptions: RetryConsumerOptions = {
+      exchangeDelay,
+      maxRetries: this.queueOptions[queue]?.maxRetries ?? DEFAULT_MAX_RETRIES,
+      defaultDelayMs: delayTime,
+    };
+
+    
+    const strategy: DelayStrategy<string> = delayStrategy ?? new FixedIntervalDelayStrategy(
+      delayTime, 
+      this.queueOptions[queue]?.maxRetries ?? DEFAULT_MAX_RETRIES
+    );
+    retryConsumer(this.channel, queueRetry, retryConsumerOptions, strategy);
+  }
+
+  private async createExtraDlqQueue(queue: Q, exchange: string, originalQueue: Q) {
+    
+    const exchangeDlxName = createExchangeDlxName(exchange);
+    const routingKey = createRoutingKeyDlqName(originalQueue);
+    
+    await this.createDeadLetterQueue(queue, '');
+    await this.bindQueue(exchangeDlxName, queue, routingKey);
+  }
+
 }

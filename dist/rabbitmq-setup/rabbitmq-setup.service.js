@@ -16,9 +16,11 @@ exports.RabbitSetupService = void 0;
 const common_1 = require("@nestjs/common");
 const rabbitmq_connection_service_1 = require("../rabbitmq-connection/rabbitmq-connection.service");
 const utils_1 = require("../utils");
+const retry_consumer_1 = require("./retry-consumers/retry-consumer");
+const fixed_interval_strategy_1 = require("./strategies/fixed-interval.strategy");
 const DEFAULT_ROUTING_KEY = '';
-const DEFAULT_DELAY_TIME = 1000 * 60 * 1;
-const DEFAULT_MAX_RETRIES = 5;
+const DEFAULT_DELAY_TIME = 1000 * 10 * 1;
+const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_QUEUE_TYPE = 'quorum';
 let RabbitSetupService = class RabbitSetupService {
     constructor(connectionService, options) {
@@ -71,16 +73,13 @@ let RabbitSetupService = class RabbitSetupService {
         };
         await this.assertQueue(queueName, queueOptions);
     }
-    async createDelayQueue(queueName, deadLetterExchange, delayTime = DEFAULT_DELAY_TIME, deadLetterRoutingkey = DEFAULT_ROUTING_KEY) {
-        const maxRetries = 5;
+    async createDelayQueue(queueName, deadLetterExchange, deadLetterRoutingkey = DEFAULT_ROUTING_KEY) {
         const queueOptions = {
             durable: true,
             autoDelete: false,
             arguments: {
                 'x-dead-letter-exchange': deadLetterExchange,
                 'x-dead-letter-routing-key': deadLetterRoutingkey,
-                'x-max-retries': maxRetries,
-                'x-message-ttl': delayTime,
                 'x-queue-type': DEFAULT_QUEUE_TYPE,
             },
         };
@@ -120,43 +119,10 @@ let RabbitSetupService = class RabbitSetupService {
             }
         }
     }
-    async createRetryQueueConsumer(retryQueueName) {
-        this.channel.consume(retryQueueName, async (message) => {
-            var _a;
-            if (!message) {
-                console.info("Message doesn't exist. Queue: ", retryQueueName);
-                return;
-            }
-            const headers = message.properties.headers || {};
-            try {
-                const originQueue = headers[rabbitmq_connection_service_1.CustomHeaderNames.FirstDeathQueue];
-                const currentCount = headers[rabbitmq_connection_service_1.CustomHeaderNames.RetryCount]
-                    ? parseInt(headers[rabbitmq_connection_service_1.CustomHeaderNames.RetryCount], 10)
-                    : 1;
-                const maxRetries = ((_a = this.queueOptions[originQueue]) === null || _a === void 0 ? void 0 : _a.maxRetries) || 0;
-                if (currentCount > maxRetries + 1) {
-                    console.warn(`Max retryes reached: ${originQueue}, sending to DLQ. message: ${message.content.toString()}`);
-                    this.channel.nack(message, false, false);
-                    return;
-                }
-                headers[rabbitmq_connection_service_1.CustomHeaderNames.RetryCount] = currentCount + 1;
-                console.info(`Resending Message to queue ${originQueue}: Message :${message.content.toString()}`);
-                this.channel.sendToQueue(originQueue, message.content, {
-                    headers: headers,
-                });
-                this.channel.ack(message);
-            }
-            catch (error) {
-                console.info(`ErrorIn Queue: ${retryQueueName}, sending to DLQ`);
-                headers[rabbitmq_connection_service_1.CustomHeaderNames.LastError] = error;
-                this.channel.nack(message, false, false);
-            }
-        });
-    }
     async closeConnection() {
         await this.channel.close();
     }
-    async setupQueue({ delayTime = DEFAULT_DELAY_TIME, exchange, maxRetries = DEFAULT_MAX_RETRIES, queue, routingKeys, }) {
+    async setupQueue({ exchange, maxRetries = DEFAULT_MAX_RETRIES, queue, routingKeys, extraDlqQueue, delayTime, delayStrategy }) {
         this.queueOptions[queue] = {
             maxRetries,
         };
@@ -165,8 +131,11 @@ let RabbitSetupService = class RabbitSetupService {
             queue,
             exchange,
             routingKeys,
+            delayStrategy,
             delayTime,
         });
+        if (extraDlqQueue)
+            await this.createExtraDlqQueue(extraDlqQueue, exchange, queue);
     }
     async setupExchangesWithRetryDlqAndDelay(exchange) {
         if (!this.createdExchanges.has(exchange)) {
@@ -180,27 +149,55 @@ let RabbitSetupService = class RabbitSetupService {
             await this.createExchange(exchangeDlx, 'topic');
         }
     }
-    async setupQueuesWithRetryAndDelay({ delayTime, exchange, queue, routingKeys, }) {
-        const delayDlqRoutingKey = (0, utils_1.createRoutingKeyDelayName)(queue);
-        const retryDlqRoutingKey = (0, utils_1.createRoutingKeyRetryName)(queue);
-        ;
+    async setupQueuesWithRetryAndDelay({ exchange, queue, routingKeys, delayTime = DEFAULT_DELAY_TIME, delayStrategy, }) {
+        var _a, _b;
+        const retryRoutingKey = (0, utils_1.createRoutingKeyRetryName)(queue);
+        const dlqRoutingKey = (0, utils_1.createRoutingKeyDlqName)(queue);
         const exchangeRetry = (0, utils_1.createExchangeRetryName)(exchange);
         const exchangeDelay = (0, utils_1.createExchangeDelayName)(exchange);
         const exchangeDlx = (0, utils_1.createExchangeDlxName)(exchange);
-        const queueDelay = (0, utils_1.createDelayQueueName)(queue);
         const queueRetry = (0, utils_1.createRetryQueueName)(queue);
         const queueDlq = (0, utils_1.createDlqQueueName)(queue);
-        await this.createQueue(queue, exchangeDelay, delayDlqRoutingKey);
+        await this.createQueue(queue, exchangeRetry, retryRoutingKey);
         for (const key of routingKeys) {
             await this.bindQueue(exchange, queue, key);
         }
-        await this.createDelayQueue(queueDelay, exchangeRetry, delayTime, retryDlqRoutingKey);
-        await this.createDeadLetterQueue(queueRetry, exchangeDlx);
-        await this.createDeadLetterQueue(queueDlq, '');
-        await this.bindQueue(exchangeRetry, queueRetry, retryDlqRoutingKey);
-        await this.bindQueue(exchangeDelay, queueDelay, delayDlqRoutingKey);
-        await this.bindQueue(exchangeDlx, queueDlq);
-        await this.createRetryQueueConsumer(queueRetry);
+        const mainRoutingKey = routingKeys && routingKeys.length ? routingKeys[0] : DEFAULT_ROUTING_KEY;
+        const maxRetries = (_b = (_a = this.queueOptions[queue]) === null || _a === void 0 ? void 0 : _a.maxRetries) !== null && _b !== void 0 ? _b : DEFAULT_MAX_RETRIES;
+        for (let step = 1; step <= maxRetries; step++) {
+            const numberedDelayQueue = (0, utils_1.createNumberedDelayQueueName)(queue, step);
+            await this.createDelayQueue(numberedDelayQueue, exchange, mainRoutingKey);
+            const routingKeyForStep = (0, utils_1.createRoutingKeyDelayName)(queue, step);
+            await this.bindQueue(exchangeDelay, numberedDelayQueue, routingKeyForStep);
+        }
+        await this.createQueue(queueRetry, exchangeDlx, dlqRoutingKey);
+        await this.createQueue(queueDlq, '');
+        await this.bindQueue(exchangeRetry, queueRetry, retryRoutingKey);
+        await this.bindQueue(exchangeDlx, queueDlq, dlqRoutingKey);
+        await this.createRetryConsumer({
+            exchange,
+            delayStrategy,
+            delayTime,
+            queue,
+        });
+    }
+    createRetryConsumer({ exchange, delayStrategy, delayTime, queue, }) {
+        var _a, _b, _c, _d;
+        const exchangeDelay = (0, utils_1.createExchangeDelayName)(exchange);
+        const queueRetry = (0, utils_1.createRetryQueueName)(queue);
+        const retryConsumerOptions = {
+            exchangeDelay,
+            maxRetries: (_b = (_a = this.queueOptions[queue]) === null || _a === void 0 ? void 0 : _a.maxRetries) !== null && _b !== void 0 ? _b : DEFAULT_MAX_RETRIES,
+            defaultDelayMs: delayTime,
+        };
+        const strategy = delayStrategy !== null && delayStrategy !== void 0 ? delayStrategy : new fixed_interval_strategy_1.FixedIntervalDelayStrategy(delayTime, (_d = (_c = this.queueOptions[queue]) === null || _c === void 0 ? void 0 : _c.maxRetries) !== null && _d !== void 0 ? _d : DEFAULT_MAX_RETRIES);
+        (0, retry_consumer_1.retryConsumer)(this.channel, queueRetry, retryConsumerOptions, strategy);
+    }
+    async createExtraDlqQueue(queue, exchange, originalQueue) {
+        const exchangeDlxName = (0, utils_1.createExchangeDlxName)(exchange);
+        const routingKey = (0, utils_1.createRoutingKeyDlqName)(originalQueue);
+        await this.createDeadLetterQueue(queue, '');
+        await this.bindQueue(exchangeDlxName, queue, routingKey);
     }
 };
 exports.RabbitSetupService = RabbitSetupService;

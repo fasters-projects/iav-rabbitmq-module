@@ -19,13 +19,27 @@ exports.RABBITMQ_OPTIONS = 'RABBITMQ_OPTIONS';
 var CustomHeaderNames;
 (function (CustomHeaderNames) {
     CustomHeaderNames["FirstDeathQueue"] = "x-first-death-queue";
+    CustomHeaderNames["LastDeathQueue"] = "x-last-death-queue";
     CustomHeaderNames["RetryCount"] = "x-retry-count";
     CustomHeaderNames["LastError"] = "x-last-error";
     CustomHeaderNames["ApplicationSource"] = "x-application-source";
 })(CustomHeaderNames || (exports.CustomHeaderNames = CustomHeaderNames = {}));
+const baseDelay = 2000;
+const maxDelay = 600000;
 let RabbitMQConnectionService = class RabbitMQConnectionService {
     constructor(options) {
         this.options = options;
+        this.reconnectAttempts = 0;
+        this.consumers = [];
+        this.proxyChannel = new Proxy({}, {
+            get: (_, prop) => {
+                if (!this.channel) {
+                    throw new Error('Channel not available (disconnected)');
+                }
+                const value = this.channel[prop];
+                return typeof value === 'function' ? value.bind(this.channel) : value;
+            },
+        });
     }
     async onModuleInit() {
         if (this.options.autoConnect === true)
@@ -33,15 +47,53 @@ let RabbitMQConnectionService = class RabbitMQConnectionService {
     }
     async connect() {
         if (!this.connection) {
-            console.log("connecting to rabbitmq...");
+            console.log("Connecting to rabbitmq...");
             this.connection = await (0, amqplib_1.connect)(this.options.url);
             this.channel = await this.connection.createConfirmChannel();
+            const originalConsume = this.channel.consume.bind(this.channel);
+            this.channel.consume = async (queue, onMessage, options) => {
+                this.consumers.push({ queue, onMessage, options });
+                return originalConsume(queue, onMessage, options);
+            };
+            this.connection.on("error", (err) => {
+                console.error("Erro na conexão RabbitMQ:", err.message);
+            });
+            this.connection.on("close", () => {
+                console.warn("Conexão RabbitMQ fechada, tentando reconectar...");
+                this.reconnect();
+            });
+            console.log("Connected to rabbitmq");
+            if (this.consumers.length > 0) {
+                console.log("Registrando consumidores novamente...");
+                for (const c of this.consumers) {
+                    console.log("Registrando consumidor:", c.queue);
+                    await originalConsume(c.queue, c.onMessage, c.options);
+                }
+            }
         }
+        return this.connection;
+    }
+    async reconnect() {
+        this.connection = null;
+        this.channel = null;
+        this.reconnectAttempts++;
+        const delay = Math.min(baseDelay * Math.pow(2, this.reconnectAttempts), maxDelay);
+        console.log(`Tentando reconectar em ${delay / 1000}s... (tentativa ${this.reconnectAttempts})`);
+        setTimeout(async () => {
+            try {
+                await this.connect();
+                this.reconnectAttempts = 0;
+            }
+            catch (err) {
+                console.error("Erro inesperado ao tentar reconectar:", err.message);
+                this.reconnect();
+            }
+        }, delay);
     }
     getChannel() {
-        if (this.channel === undefined)
+        if (this.proxyChannel === undefined || this.channel === undefined)
             throw new Error('RabbitMQ connection failed!');
-        return this.channel;
+        return this.proxyChannel;
     }
     publish(publishOptions) {
         if (this.channel === undefined)
